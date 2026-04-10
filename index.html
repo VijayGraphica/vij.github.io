@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Générateur QR vCard</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22c55e;
+      --accent-dark: #16a34a;
+      --border: #1f2937;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: linear-gradient(160deg, #020617 0%, #0f172a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .app {
+      width: min(780px, 100%);
+      background: rgba(17, 24, 39, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+    }
+    h1 { margin-top: 0; margin-bottom: 8px; }
+    p { color: var(--muted); margin-top: 0; }
+    .grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    label { display: grid; gap: 6px; font-size: 0.92rem; }
+    input {
+      background: #030712;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+    input:focus {
+      outline: 2px solid #14532d;
+      border-color: #14532d;
+    }
+    .actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button, a.btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button {
+      background: var(--accent);
+      color: #052e16;
+    }
+    button:hover { background: var(--accent-dark); }
+    a.btn {
+      background: #1f2937;
+      color: var(--text);
+    }
+    .result {
+      margin-top: 20px;
+      display: grid;
+      gap: 10px;
+      justify-items: start;
+    }
+    #qr {
+      width: 280px;
+      height: 280px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fff;
+      object-fit: contain;
+      display: none;
+    }
+    code {
+      white-space: pre-wrap;
+      background: #030712;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      width: 100%;
+      color: #d1d5db;
+    }
+    .share {
+      width: 100%;
+      display: grid;
+      gap: 8px;
+    }
+    .share-row {
+      width: 100%;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #public-link {
+      flex: 1 1 340px;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <h1>Générateur de QR Code vCard</h1>
+    <p>Renseigne les infos de contact (nom, téléphone, email...) puis génère ton QR code partageable.</p>
+
+    <form id="vcard-form">
+      <div class="grid">
+        <label>Prénom
+          <input type="text" id="firstName" placeholder="Jean" required />
+        </label>
+        <label>Nom
+          <input type="text" id="lastName" placeholder="Dupont" required />
+        </label>
+        <label>Téléphone
+          <input type="tel" id="phone" placeholder="+33 6 12 34 56 78" required />
+        </label>
+        <label>Email
+          <input type="email" id="email" placeholder="jean@exemple.com" />
+        </label>
+        <label>Entreprise
+          <input type="text" id="org" placeholder="Mon entreprise" />
+        </label>
+        <label>Site web
+          <input type="url" id="website" placeholder="https://exemple.com" />
+        </label>
+      </div>
+
+      <div class="actions">
+        <button type="submit">Générer le QR vCard</button>
+        <a class="btn" id="download" href="#" download="vcard-qr.png" style="display:none;">Télécharger le QR</a>
+      </div>
+    </form>
+
+    <section class="result">
+      <img id="qr" alt="QR Code vCard" />
+      <code id="preview" aria-live="polite"></code>
+      <div class="share">
+        <strong>Lien public</strong>
+        <div class="share-row">
+          <input id="public-link" type="text" readonly placeholder="Le lien public sera affiché ici" />
+          <button type="button" id="copy-link">Copier le lien</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('vcard-form');
+    const qrImg = document.getElementById('qr');
+    const preview = document.getElementById('preview');
+    const download = document.getElementById('download');
+    const publicLinkInput = document.getElementById('public-link');
+    const copyLinkButton = document.getElementById('copy-link');
+
+    const esc = (value) => (value || '').replace(/[;,:\\]/g, '\\\\$&').trim();
+    const fields = ['firstName', 'lastName', 'phone', 'email', 'org', 'website'];
+
+    function serializeData(data) {
+      return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(data)))));
+    }
+
+    function deserializeData(encoded) {
+      try {
+        return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(encoded)))));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function buildVCard({ firstName, lastName, phone, email, org, website }) {
+      const lines = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `N:${esc(lastName)};${esc(firstName)};;;`,
+        `FN:${esc(`${firstName} ${lastName}`.trim())}`,
+        `TEL;TYPE=CELL:${esc(phone)}`,
+      ];
+
+      if (email) lines.push(`EMAIL;TYPE=INTERNET:${esc(email)}`);
+      if (org) lines.push(`ORG:${esc(org)}`);
+      if (website) lines.push(`URL:${esc(website)}`);
+
+      lines.push('END:VCARD');
+      return lines.join('\n');
+    }
+
+    function readFormData() {
+      return {
+        firstName: form.firstName.value,
+        lastName: form.lastName.value,
+        phone: form.phone.value,
+        email: form.email.value,
+        org: form.org.value,
+        website: form.website.value,
+      };
+    }
+
+    function applyDataToForm(data) {
+      fields.forEach((field) => {
+        if (typeof data[field] === 'string') form[field].value = data[field];
+      });
+    }
+
+    function buildPublicLink(data) {
+      const base = `${window.location.origin}${window.location.pathname}`;
+      return `${base}?contact=${serializeData(data)}`;
+    }
+
+    function updateOutputs(data) {
+      const vcard = buildVCard(data);
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=700x700&data=${encodeURIComponent(vcard)}`;
+      const publicLink = buildPublicLink(data);
+
+      qrImg.src = qrUrl;
+      qrImg.style.display = 'block';
+      preview.textContent = vcard;
+      download.href = qrUrl;
+      download.style.display = 'inline-flex';
+      publicLinkInput.value = publicLink;
+    }
+
+    function hydrateFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const encoded = params.get('contact');
+      if (!encoded) return;
+      const data = deserializeData(encoded);
+      if (!data) return;
+      applyDataToForm(data);
+      updateOutputs(readFormData());
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      updateOutputs(readFormData());
+    });
+
+    copyLinkButton.addEventListener('click', async () => {
+      if (!publicLinkInput.value) return;
+      try {
+        await navigator.clipboard.writeText(publicLinkInput.value);
+        copyLinkButton.textContent = 'Lien copié ✓';
+      } catch (_) {
+        publicLinkInput.select();
+        document.execCommand('copy');
+        copyLinkButton.textContent = 'Lien copié ✓';
+      }
+
+      setTimeout(() => {
+        copyLinkButton.textContent = 'Copier le lien';
+      }, 1800);
+    });
+
+    hydrateFromUrl();
+  </script>
+</body>
+</html>
